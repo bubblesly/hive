@@ -21,12 +21,14 @@ package org.apache.hadoop.hive.ql.exec;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Serializable;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 
 import org.apache.commons.logging.Log;
@@ -55,6 +57,7 @@ import org.apache.hadoop.hive.ql.plan.FileSinkDesc.DPSortState;
 import org.apache.hadoop.hive.ql.plan.ListBucketingCtx;
 import org.apache.hadoop.hive.ql.plan.PlanUtils;
 import org.apache.hadoop.hive.ql.plan.SkewedColumnPositionPair;
+import org.apache.hadoop.hive.ql.plan.TableDesc;
 import org.apache.hadoop.hive.ql.plan.api.OperatorType;
 import org.apache.hadoop.hive.ql.stats.StatsCollectionTaskIndependent;
 import org.apache.hadoop.hive.ql.stats.StatsPublisher;
@@ -340,7 +343,12 @@ public class FileSinkOperator extends TerminalOperator<FileSinkDesc> implements
       taskId = Utilities.getTaskId(hconf);
       initializeSpecPath();
       fs = specPath.getFileSystem(hconf);
-      hiveOutputFormat = HiveFileFormatUtils.getHiveOutputFormat(hconf, conf.getTableInfo());
+      try {
+        createHiveOutputFormat(hconf);
+      } catch (HiveException ex) {
+        logOutputFormatError(hconf, ex);
+        throw ex;
+      }
       isCompressed = conf.getCompressed();
       parent = Utilities.toTempPath(conf.getDirName());
       statsCollectRawDataSize = conf.isStatsCollectRawDataSize();
@@ -426,6 +434,26 @@ public class FileSinkOperator extends TerminalOperator<FileSinkDesc> implements
       suffix = suffix + "_" + fullName.toLowerCase();
     }
     return counter + "_" + suffix;
+  }
+
+  private void logOutputFormatError(Configuration hconf, HiveException ex) {
+    StringWriter errorWriter = new StringWriter();
+    errorWriter.append("Failed to create output format; configuration: ");
+    try {
+      Configuration.dumpConfiguration(hconf, errorWriter);
+    } catch (IOException ex2) {
+      errorWriter.append("{ failed to dump configuration: " + ex2.getMessage() + " }");
+    }
+    Properties tdp = null;
+    if (this.conf.getTableInfo() != null
+        && (tdp = this.conf.getTableInfo().getProperties()) != null) {
+      errorWriter.append(";\n table properties: { ");
+      for (Map.Entry<Object, Object> e : tdp.entrySet()) {
+        errorWriter.append(e.getKey() + ": " + e.getValue() + ", ");
+      }
+      errorWriter.append('}');
+    }
+    LOG.error(errorWriter.toString(), ex);
   }
 
   /**
@@ -1073,10 +1101,10 @@ public class FileSinkOperator extends TerminalOperator<FileSinkDesc> implements
 
   public void checkOutputSpecs(FileSystem ignored, JobConf job) throws IOException {
     if (hiveOutputFormat == null) {
-      Utilities.copyTableJobPropertiesToConf(conf.getTableInfo(), job);
       try {
-        hiveOutputFormat = HiveFileFormatUtils.getHiveOutputFormat(job, getConf().getTableInfo());
-      } catch (Exception ex) {
+        createHiveOutputFormat(job);
+      } catch (HiveException ex) {
+        logOutputFormatError(job, ex);
         throw new IOException(ex);
       }
     }
@@ -1089,6 +1117,17 @@ public class FileSinkOperator extends TerminalOperator<FileSinkDesc> implements
         //For BC, ignore this for now, but leave a log message
         LOG.warn("HiveOutputFormat should implement checkOutputSpecs() method`");
       }
+    }
+  }
+
+  private void createHiveOutputFormat(Configuration hconf) throws HiveException {
+    if (hiveOutputFormat == null) {
+      Utilities.copyTableJobPropertiesToConf(conf.getTableInfo(), hconf);
+    }
+    try {
+      hiveOutputFormat = HiveFileFormatUtils.getHiveOutputFormat(hconf, getConf().getTableInfo());
+    } catch (Throwable t) {
+      throw (t instanceof HiveException) ? (HiveException)t : new HiveException(t);
     }
   }
 

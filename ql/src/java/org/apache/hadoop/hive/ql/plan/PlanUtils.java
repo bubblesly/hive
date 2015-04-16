@@ -811,7 +811,7 @@ public final class PlanUtils {
                   tableDesc,
                   jobProperties);
             } catch(AbstractMethodError e) {
-                LOG.debug("configureInputJobProperties not found "+
+                LOG.info("configureInputJobProperties not found "+
                     "using configureTableJobProperties",e);
                 storageHandler.configureTableJobProperties(tableDesc, jobProperties);
             }
@@ -822,7 +822,7 @@ public final class PlanUtils {
                   tableDesc,
                   jobProperties);
             } catch(AbstractMethodError e) {
-                LOG.debug("configureOutputJobProperties not found"+
+                LOG.info("configureOutputJobProperties not found"+
                     "using configureTableJobProperties",e);
                 storageHandler.configureTableJobProperties(tableDesc, jobProperties);
             }
